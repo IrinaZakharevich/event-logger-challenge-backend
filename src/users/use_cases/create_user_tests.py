@@ -3,10 +3,9 @@ from collections.abc import Generator
 from unittest.mock import ANY
 
 import pytest
-from clickhouse_connect.driver import Client
-from django.conf import settings
-
 from users.use_cases import CreateUser, CreateUserRequest, UserCreated
+
+from core.models import EventOutbox
 
 pytestmark = [pytest.mark.django_db]
 
@@ -17,8 +16,8 @@ def f_use_case() -> CreateUser:
 
 
 @pytest.fixture(autouse=True)
-def f_clean_up_event_log(f_ch_client: Client) -> Generator:
-    f_ch_client.query(f'TRUNCATE TABLE {settings.CLICKHOUSE_EVENT_LOG_TABLE_NAME}')
+def f_clean_up_event_outbox() -> Generator:
+    EventOutbox.objects.all().delete()
     yield
 
 
@@ -46,8 +45,7 @@ def test_emails_are_unique(f_use_case: CreateUser) -> None:
 
 
 def test_event_log_entry_published(
-    f_use_case: CreateUser,
-    f_ch_client: Client,
+    f_use_case: CreateUser
 ) -> None:
     email = f'test_{uuid.uuid4()}@email.com'
     request = CreateUserRequest(
@@ -55,14 +53,15 @@ def test_event_log_entry_published(
     )
 
     f_use_case.execute(request)
-    log = f_ch_client.query("SELECT * FROM default.event_log WHERE event_type = 'user_created'")
-
-    assert log.result_rows == [
-        (
-            'user_created',
-            ANY,
-            'Local',
-            UserCreated(email=email, first_name='Test', last_name='Testovich').model_dump_json(),
-            1,
-        ),
+    log = list(EventOutbox.objects.all())
+    log_data = [
+        (entry.event_type, entry.event_date_time, entry.environment, entry.event_context, entry.metadata_version)
+        for entry in log
     ]
+    assert log_data[0] == (
+        'user_created',
+        ANY,
+        'Local',
+        UserCreated(email=email, first_name='Test', last_name='Testovich').model_dump_json(),
+        1,
+    )

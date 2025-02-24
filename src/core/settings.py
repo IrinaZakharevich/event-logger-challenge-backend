@@ -4,6 +4,7 @@ from pathlib import Path
 import environ
 import sentry_sdk
 import structlog
+from celery.schedules import crontab
 
 env = environ.Env(
     DEBUG=(bool, False),
@@ -30,6 +31,7 @@ INSTALLED_APPS = [
 
     # project apps
     'users',
+    'core',
 ]
 
 MIDDLEWARE = [
@@ -184,3 +186,15 @@ if SENTRY_SETTINGS.get("dsn") and not DEBUG:
         ],
         default_integrations=False,
     )
+
+CH_OUTBOX_PROCESSING_INTERVAL_MIN = int(os.getenv("CH_OUTBOX_PROCESSING_INTERVAL_MIN", 1))
+
+CELERY_BROKER = env("CELERY_BROKER", default="redis://redis:6379/0")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://redis:6379/0")
+
+CELERY_BEAT_SCHEDULE = {
+    'process_outbox_events': {
+        'task': 'core.tasks.process_event_outbox',
+        "schedule": crontab(minute=f"*/{CH_OUTBOX_PROCESSING_INTERVAL_MIN}"),
+    },
+}
